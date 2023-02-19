@@ -1,0 +1,145 @@
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local serverStorage = game:GetService("ServerStorage")
+local players = game:GetService("Players")
+local Class = require(game:GetService("ReplicatedFirst").Libraries.Class)
+local Interfaces = serverStorage.Minigames.Interfaces
+
+local Timer = Class()
+
+
+function Timer:New(name: string, seconds : number, folderName : string)
+	self.name = name or tostring(self)
+	
+	self.duration = seconds
+	
+	self.__needToStop = false
+	self.__timerChangedListeners = {}
+	
+	local location = nil
+	if folderName then 
+		location = script.Timers:FindFirstChild(folderName) 
+		if not location then
+			location = Instance.new("Folder", script.Timers)
+			location.Name = folderName
+		end
+	end
+	--generate IntValue object to replicate to client if needed
+	self.__timer = Instance.new("IntValue", location or script.Timers)
+	self.__timer.Name = self.name
+	self.__timer.Value = self.duration
+	
+	--generate events and listeners:
+	self.__endedEvent = Instance.new("BindableEvent")
+	self.Ended = self.__endedEvent.Event
+	
+	--generate changed event
+	self._changedEvent = Instance.new("BindableEvent")
+	self.Changed = self._changedEvent.Event
+	self._changedListener = self.__timer.Changed:Connect(function(value)
+		self._changedEvent:Fire(value)
+	end)
+	
+	 --detach the asset if destroying
+	--self.__detachAssetsConnection =  self.OnDestroy:Connect(function()
+	--end)
+end
+
+local function ParseTimeToString(theTime, format)
+	if format then
+		--TODO:ADD_FORMAT
+	else -- fallback to default format which is mm:ss
+		local minutes = math.floor(theTime / 60) 
+		local seconds = theTime - minutes*60
+
+		return (if minutes < 10 then "0"..minutes else minutes)..":"..(if seconds < 10 then "0"..seconds else seconds)
+	end
+end
+
+function Timer:AttachTextObject(textObject, format)
+	if not textObject then return end
+	--table.insert(self.__assets, textObject)
+	--update text:
+	textObject.Text = ParseTimeToString(self.__timer.Value , format)
+	
+	--connect to change of timer:
+	table.insert(self.__timerChangedListeners, self.__timer:GetPropertyChangedSignal("Value"):Connect(function()
+		if textObject then textObject.Text = ParseTimeToString(self.__timer.Value, format) end
+	end))	
+end
+
+function Timer:AttachTextObjectToElapsedTime(textObject, format)
+	if not textObject then return end
+	--update text:
+	textObject.Text = ParseTimeToString(self.duration - self.__timer.Value, format)
+
+	--connect to change of timer:
+	if not self.__timerChangedListeners[textObject] then
+		self.__timerChangedListeners[textObject] = self.__timer:GetPropertyChangedSignal("Value"):Connect(function()
+			if textObject then textObject.Text = ParseTimeToString(self.duration - self.__timer.Value, format) end
+		end)
+	end
+end
+
+function Timer:AttachBar(bar)
+	if not bar then return end
+	--set Initial BarSize:
+	bar.Size = UDim2.new(self.__timer.Value / self.duration, 0,1, 0)
+
+	--connect to change of timer:
+	if not self.__timerChangedListeners[bar] then
+		self.__timerChangedListeners[bar] = self.__timer:GetPropertyChangedSignal("Value"):Connect(function()
+			if bar then bar.Size = UDim2.new(self.__timer.Value / self.duration, 0, 1, 0) end
+		end)
+	end
+end
+
+function Timer:DetachTextObject(object)
+	if self.__timerChangedListeners[object] then 
+		self.__timerChangedListeners[object]:Disconnect()
+		self.__timerChangedListeners[object] = nil
+	end
+end
+
+function Timer:Start()
+	self.__needToStop = false
+	task.spawn(function()
+		while self.__timer and self.__timer.Value > 0 and not self.__needToStop do
+			task.wait(1)
+			if self.__timer then self.__timer.Value -= 1 end	
+		end
+		self:End()
+	end)
+	
+end
+
+function Timer:Stop()
+	self.__needToStop = true
+end
+
+function Timer:End()
+	if self.__endedEvent then self.__endedEvent:Fire() end
+end
+
+function Timer:Reset()
+	self:Stop()
+	self.__timer.Value = self.duration
+end
+
+function Timer:__tostring()
+	return "Timer"
+end
+
+function Timer:GetCurrentTimeText(format)
+	return ParseTimeToString(self.__timer.Value, format)
+end
+
+function Timer:GetElapsedTimeText(format)
+	return ParseTimeToString(self.duration - self.__timer.Value, format)
+end
+
+function Timer:ElapsedTime()
+	return self.duration - self.__timer.Value
+end
+
+
+return Timer
